@@ -1,0 +1,9 @@
+goal is primarily lightweightedness--no photo editing features, just media management. this exists for music, so why not for other media?
+media 
+the presentation can be similar to digikam, but without all of the photo editing hooks
+databases:
+    organize tags heirarchically--we don't need strict relational guarantees
+
+for now, focus on good heirarchical tagging systems, and tag search from CLI. similar to beets, instead of forcing tags to be written to file metadata, make it stored in the database and make it an option to write tags
+
+first task: write a cli that uses a key/value store (based on image data hash) to retrieve tags
