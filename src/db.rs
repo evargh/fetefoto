@@ -1,5 +1,4 @@
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-use std::collections::HashSet;
 use thiserror;
 use crate::image::Image;
 
@@ -19,17 +18,13 @@ pub enum DatabaseError {
 }
 
 impl ImageDB {
-    pub async fn new(filepath: String) -> Result<ImageDB, DatabaseError> {
+    pub async fn new(filepath: &str) -> Result<ImageDB, DatabaseError> {
         let pool = SqlitePool::connect(&filepath).await.map_err(|e| DatabaseError::SQLXError(e))?;
-        Ok(ImageDB { filepath, pool })
+        Ok(ImageDB { filepath: String::from(filepath), pool })
     }
 
     pub fn get_filepath(&self) -> &str {
         &self.filepath
-    }
-
-    pub fn set_filepath(&mut self, fp: String) {
-        self.filepath = fp;
     }
 
     pub async fn create_db(filepath: &str) -> Result<(), DatabaseError> {
@@ -45,7 +40,7 @@ impl ImageDB {
         }
     }
 
-    pub async fn create_table(&self) -> Result<(), DatabaseError> {
+    pub async fn create_table(&mut self) -> Result<(), DatabaseError> {
         let mut db = self.pool.acquire().await.map_err(|e| DatabaseError::SQLXError(e))?;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS images (
@@ -56,30 +51,30 @@ impl ImageDB {
         Ok(())
     }
 
-    pub async fn add_images_to_db(&self, ims: HashSet<Image>) -> Result<(), DatabaseError> {
+    pub async fn add_images_to_db<'a>(&mut self, ims: impl IntoIterator<Item=&'a Image>) -> Result<(), DatabaseError> {
         let mut db = self.pool.acquire().await.map_err(|e| DatabaseError::SQLXError(e))?;
 
-        for i in ims {
-            sqlx::query("INSERT INTO images (hash, tags) VALUES (?1, ?2)")
-                .bind(i.get_hash())
-                .bind(i.tags_to_string())
-                .execute(&mut *db)
-                .await
-                .map_err(|e| DatabaseError::SQLXError(e))?;
-        }
+        let pairs = &ims.into_iter().map(|x| format!("(\'{}\', \'{}\')", x.get_hash(), x.tags_to_string())).collect::<Vec<String>>().join(" ")[..];
+        println!("{}", pairs);
+        sqlx::query(&format!("INSERT INTO images (hash, tags) VALUES {};", pairs)[..])
+            .execute(&mut *db)
+            .await
+            .map_err(|e| DatabaseError::SQLXError(e))?;
+
         Ok(())
     }
 
-    pub async fn get_images_from_db(&self, hs: HashSet<String>) -> Result<(), DatabaseError> {
+    pub async fn get_images_from_db<'a>(&self, hs: impl IntoIterator<Item=&'a str>) -> Result<(), DatabaseError> {
         let mut db = self.pool.acquire().await.map_err(|e| DatabaseError::SQLXError(e))?;
 
-        for i in hs {
-            sqlx::query("SELECT id, hash, tags FROM images WHERE hash=?1")
-                .bind(i)
-                .execute(&mut *db)
-                .await
-                .map_err(|e| DatabaseError::SQLXError(e))?;
-        }
+        let pairs = &hs.into_iter().collect::<Vec<&str>>().join(" OR ")[..];
+        println!("{}", pairs);
+        // TODO: FIX THIS
+        sqlx::query(&format!("SELECT id, name FROM users WHERE {} ", pairs)[..])
+            .execute(&mut *db)
+            .await
+            .map_err(|e| DatabaseError::SQLXError(e))?;
+
         Ok(())
     }
 }
@@ -87,22 +82,39 @@ impl ImageDB {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{error, collections::HashSet};
+
+    // I can't directly test some of the database logic, so some of the tests will have
+    // dependencies
+    // I'm going to just make one integration test
+
+    #[tokio::test]
+    async fn create_new_database() -> Result<(), Box<dyn error::Error>>{
+        let filename = "sqlite://fetefoto.db";
+        println!("creating file");
+        ImageDB::create_db(filename).await?;
+
+        println!("creating object");
+        let mut db = ImageDB::new(filename).await?;
+
+        println!("creating table");
+        db.create_table().await?;
+ 
+        println!("adding image");
+        let output: Image = Image::new_with_tags(String::from("abc"), HashSet::from([String::from("hi")]));
+        db.add_images_to_db(std::iter::once(&output)).await?;
+
+        //fs::remove_file("fetefoto.db")?;
+        Ok(())
+    }
 
     #[test]
-    fn create_new_database() {
+    fn remove_images_from_database() {
 
     }
 
     #[test]
-    fn create_table_in_database() {
-    }
-
-    #[test]
-    fn add_image_to_database() {
-    }
-
-    #[test]
-    fn remove_image_from_database() {
+    fn update_images_in_database() {
 
     }
  

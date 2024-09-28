@@ -83,11 +83,13 @@ mod tests {
         assert_eq!(input, output);
     }
 
+    // Non-deterministic ordering
     #[test]
     fn compare_tags_to_string() {
-        let input: Image = Image::new_with_tags(String::from("abc"), HashSet::from([String::from("a"), String::from("b"), String::from("c")]));
-        let data = "[\"b\",\"c\",\"a\"]";
-
-        assert_eq!(input.tags_to_string(), data);
+        let tags = HashSet::from([String::from("a"), String::from("b"), String::from("c")]);
+        let input: Image = Image::new_with_tags(String::from("abc"), tags.clone());
+        let data_string = input.tags_to_string();
+        let data_hash = Image::string_to_tags(data_string).unwrap();
+        assert_eq!(data_hash, tags);
     }
 }
