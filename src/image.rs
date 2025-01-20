@@ -1,12 +1,17 @@
-use std::collections::HashSet;
-use serde_json::json;
-use std::fs;
-use sha2::{Sha256, Digest};
 use base64ct::{Base64, Encoding};
+use sha2::{Digest, Sha256};
+use std::{collections::HashSet, fs};
+
+#[derive(Debug, thiserror::Error)]
+pub enum ImageError {
+    #[error("Failed to Read Image")]
+    ReadFail,
+}
 
 #[derive(Debug)]
 pub struct Image {
     hash: String,
+    filepath: String,
     tags: HashSet<String>,
 }
 
@@ -17,12 +22,32 @@ impl PartialEq for Image {
 }
 
 impl Image {
-    pub fn new(hash:String) -> Image {
-        Image { hash, tags: HashSet::default() }
+    pub fn new(filepath: String) -> Result<Image, ImageError> {
+        if let Ok(hs) = Image::hash_image(&filepath) {
+            Ok(Image {
+                filepath,
+                hash: hs,
+                tags: HashSet::default(),
+            })
+        } else {
+            Err(ImageError::ReadFail)
+        }
     }
 
-    pub fn new_with_tags(hash: String, tags:HashSet<String>) -> Image {
-        Image { hash, tags }
+    pub fn new_with_tags(filepath: String, tags: HashSet<String>) -> Result<Image, ImageError> {
+        if let Ok(hs) = Image::hash_image(&filepath) {
+            Ok(Image {
+                filepath,
+                hash: hs,
+                tags,
+            })
+        } else {
+            Err(ImageError::ReadFail)
+        }
+    }
+
+    pub fn get_fp(&self) -> &str {
+        &self.filepath[..]
     }
 
     pub fn get_hash(&self) -> &str {
@@ -37,59 +62,63 @@ impl Image {
         self.tags.remove(t);
     }
 
-    pub fn tags_to_string(&self) -> String {
-        json!(self.tags).to_string()
+    pub fn get_tags(&self) -> &HashSet<String> {
+        &self.tags
     }
 
-    pub fn string_to_tags(ts: String) -> Result<HashSet<String>, serde_json::Error> {
-        let ret: HashSet<String> = serde_json::from_str(&ts)?;
-        Ok(ret)
-    }
-
-    pub fn hash_image(fp: String) -> std::io::Result<String> {
-        let data: Vec<u8> = fs::read(fp)?;
+    pub fn hash_image(fp: &str) -> Result<String, ImageError> {
+        let data: Vec<u8> = fs::read(fp).map_err(|_| ImageError::ReadFail)?;
         let mut hasher = Sha256::new();
-        
+
         hasher.update(data);
         let hash = hasher.finalize();
         Ok(Base64::encode_string(&hash))
-
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn add_tag_to_image() {
-        let mut input: Image = Image::new(String::from("abc"));
-        let output: Image = Image::new_with_tags(String::from("abc"), HashSet::from([String::from("hi")]));
+    fn add_tag_to_image() -> Result<(), Box<dyn std::error::Error>> {
+        let mut input: Image = Image::new(String::from("test/abc.gif"))?;
+        let output: Image = Image::new_with_tags(
+            String::from("test/abc.gif"),
+            HashSet::from([String::from("hi")]),
+        )?;
 
         input.add_tag(String::from("hi"));
 
         assert_eq!(input, output);
-
+        Ok(())
     }
 
     #[test]
-    fn remove_tag_from_image() {
-        let mut input: Image = Image::new_with_tags(String::from("abc"), HashSet::from([String::from("hi")]));
-        let output: Image = Image::new(String::from("abc"));
+    fn add_unicode_tag_to_image() -> Result<(), Box<dyn std::error::Error>> {
+        let mut input: Image = Image::new(String::from("test/abc.gif"))?;
+        let output: Image = Image::new_with_tags(
+            String::from("test/abc.gif"),
+            HashSet::from([String::from("你好")]),
+        )?;
+
+        input.add_tag(String::from("你好"));
+
+        assert_eq!(input, output);
+        Ok(())
+    }
+
+    #[test]
+    fn remove_tag_from_image() -> Result<(), Box<dyn std::error::Error>> {
+        let mut input: Image = Image::new_with_tags(
+            String::from("test/abc.gif"),
+            HashSet::from([String::from("hi")]),
+        )?;
+        let output: Image = Image::new(String::from("test/abc.gif"))?;
 
         input.remove_tag("hi");
 
         assert_eq!(input, output);
-    }
-
-    // Non-deterministic ordering
-    #[test]
-    fn compare_tags_to_string() {
-        let tags = HashSet::from([String::from("a"), String::from("b"), String::from("c")]);
-        let input: Image = Image::new_with_tags(String::from("abc"), tags.clone());
-        let data_string = input.tags_to_string();
-        let data_hash = Image::string_to_tags(data_string).unwrap();
-        assert_eq!(data_hash, tags);
+        Ok(())
     }
 }

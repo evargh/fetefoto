@@ -1,9 +1,7 @@
-use sqlx::{migrate::MigrateDatabase, Sqlite};
 use std::error;
 
-pub mod image;
-use crate::image::Image;
 pub mod db;
+pub mod image;
 
 // try out some test-driven development:
 // first, get the Image object off the ground
@@ -25,6 +23,5 @@ pub mod db;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
-
     Ok(())
 }
