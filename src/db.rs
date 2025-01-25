@@ -1,14 +1,20 @@
 use crate::image::Image;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use thiserror;
 
 #[derive(Debug, Default, sqlx::FromRow)]
 #[sqlx(default)]
 pub struct ImageRow {
-    hash: Option<String>,
-    filepath: Option<String>,
-    tag: Option<String>,
+    pub hash: Option<String>,
+    pub fp: Option<String>,
+    pub name: Option<String>,
+}
+
+impl ImageRow {
+    pub fn same_image(&self, other: &ImageRow) -> bool {
+        self.hash == other.hash
+    }
 }
 
 pub struct ImageDB {
@@ -192,8 +198,6 @@ impl ImageDB {
                 .map(|x| format!("({}, {})", image_result, x))
                 .collect::<Vec<String>>();
 
-            println!("{:?}", image_tag_tuples);
-
             sqlx::query(
                 &format!(
                     "INSERT INTO images_to_tags (image_id, tag_id) VALUES {};",
@@ -208,11 +212,10 @@ impl ImageDB {
         Ok(())
     }
 
-    // TODO: convert this from imagerows to images
     pub async fn get_images_from_db_by_fp<'a>(
         &self,
         fp: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> Result<Vec<ImageRow>, DatabaseError> {
+    ) -> Result<Vec<Image>, DatabaseError> {
         let hashes = fp
             .into_iter()
             .map(|x| Image::hash_image(x.as_ref()))
@@ -225,72 +228,97 @@ impl ImageDB {
     pub async fn get_images_from_db_by_hashes<'a>(
         &self,
         hs: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> Result<Vec<ImageRow>, DatabaseError> {
-        let mut db = self
-            .pool
-            .acquire()
-            .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
-
-        // TODO: Convert ImageRow to a full Image
-        let pairs = &hs
+    ) -> Result<Vec<Image>, DatabaseError> {
+        let pairs = hs
             .into_iter()
             .map(|x| format!("name = \'{}\'", x.as_ref()))
             .collect::<Vec<String>>()
-            .join(" OR ")[..];
-        let image_data: Vec<ImageRow> = sqlx::query_as(
-            &format!(
-                "SELECT fp, hash, name FROM images 
-                INNER JOIN images_to_tags ON images.id = images_to_tags.image_id 
-                INNER JOIN tags ON images_to_tags.tag_id = tags.id 
-                WHERE {};",
-                pairs
-            )[..],
-        )
-        .fetch_all(&mut *db)
-        .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+            .join(" OR ");
 
-        // format fp|hash|tag
-        Ok(image_data)
+        self.req_imagerow_from_db(pairs).await
     }
 
     pub async fn get_images_from_db_by_tags<'a>(
         &self,
         ts: impl IntoIterator<Item = impl AsRef<str>>,
         query: FilterType,
-    ) -> Result<Vec<ImageRow>, DatabaseError> {
+    ) -> Result<Vec<Image>, DatabaseError> {
+        let q = match query {
+            FilterType::AND => " AND ",
+            FilterType::OR => " OR ",
+        };
+
+        let pairs = ts
+            .into_iter()
+            .map(|x| format!("name = \'{}\'", x.as_ref()))
+            .collect::<Vec<String>>()
+            .join(q);
+
+        self.req_imagerow_from_db(pairs).await
+    }
+
+    // TODO: lots of unwraps
+    fn convert_imagerow_to_images(irs: impl IntoIterator<Item = ImageRow>) -> Vec<Image> {
+        let mut image_map: HashMap<String, Image> = HashMap::new();
+
+        let irs = irs.into_iter().collect::<Vec<ImageRow>>();
+        for ir in irs {
+            let fp = ir.fp.unwrap();
+            let tag = ir.name.unwrap();
+
+            image_map
+                .entry(ir.hash.unwrap())
+                .and_modify(|im| im.add_tag(tag.to_owned()))
+                .or_insert_with(|| Image::new_with_tags(fp, vec![tag.to_owned()]).unwrap());
+        }
+        image_map.into_values().collect::<Vec<Image>>()
+    }
+
+    async fn req_imagerow_from_db(
+        &self,
+        pairs: impl AsRef<str>,
+    ) -> Result<Vec<Image>, DatabaseError> {
         let mut db = self
             .pool
             .acquire()
             .await
             .map_err(|e| DatabaseError::SQLXError(e))?;
 
-        let q = match query {
-            FilterType::AND => " AND ",
-            FilterType::OR => " OR ",
-        };
-
-        // TODO: Make this so that it populates the Image struct
-        let pairs = &ts
-            .into_iter()
-            .map(|x| format!("name = \'{}\'", x.as_ref()))
-            .collect::<Vec<String>>()
-            .join(q)[..];
-        let image_data: Vec<ImageRow> = sqlx::query_as(
+        // select all hashes such that there is a tag match
+        let hashes: Vec<String> = sqlx::query_scalar(
             &format!(
-                "SELECT fp, hash, name FROM images 
+                "SELECT hash FROM images 
                 INNER JOIN images_to_tags ON images.id = images_to_tags.image_id 
                 INNER JOIN tags ON images_to_tags.tag_id = tags.id 
                 WHERE {};",
-                pairs
+                pairs.as_ref()
             )[..],
         )
         .fetch_all(&mut *db)
         .await
         .map_err(|e| DatabaseError::SQLXError(e))?;
 
-        Ok(image_data)
+        // query for all those hashes
+        let hash_pairs = hashes
+            .into_iter()
+            .map(|x| format!("hash = \'{}\'", x))
+            .collect::<Vec<String>>()
+            .join(" OR ");
+
+        let image_data: Vec<ImageRow> = sqlx::query_as(
+            &format!(
+                "SELECT fp, hash, name FROM images 
+                INNER JOIN images_to_tags ON images.id = images_to_tags.image_id 
+                INNER JOIN tags ON images_to_tags.tag_id = tags.id 
+                WHERE {};",
+                hash_pairs
+            )[..],
+        )
+        .fetch_all(&mut *db)
+        .await
+        .map_err(|e| DatabaseError::SQLXError(e))?;
+
+        Ok(ImageDB::convert_imagerow_to_images(image_data))
     }
 
     // delete by submitting image, not hash
@@ -375,8 +403,16 @@ mod tests {
         let output = db
             .get_images_from_db_by_tags(std::iter::once("hi"), FilterType::OR)
             .await?;
-        println!("{:?}", output);
-        //assert_eq!(output, vec!["test/abc.gif", "test/test2/ghi.jpg"]);
+
+        let im1: Image = Image::new_with_tags(
+            String::from("test/abc.gif"),
+            HashSet::from([String::from("hi"), String::from("bye")]),
+        )?;
+        let im2: Image = Image::new_with_tags(
+            String::from("test/test2/ghi.jpg"),
+            HashSet::from([String::from("hi"), String::from("hi")]),
+        )?;
+        assert_eq!(output, vec![im1, im2]);
 
         println!("removing image");
         db.delete_images_from_db(std::iter::once("test/test2/ghi.jpg"))

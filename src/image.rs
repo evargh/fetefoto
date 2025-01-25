@@ -34,12 +34,18 @@ impl Image {
         }
     }
 
-    pub fn new_with_tags(filepath: String, tags: HashSet<String>) -> Result<Image, ImageError> {
+    pub fn new_with_tags(
+        filepath: String,
+        tags: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Result<Image, ImageError> {
         if let Ok(hs) = Image::hash_image(&filepath) {
             Ok(Image {
                 filepath,
                 hash: hs,
-                tags,
+                tags: tags
+                    .into_iter()
+                    .map(|x| x.as_ref().to_owned())
+                    .collect::<HashSet<String>>(),
             })
         } else {
             Err(ImageError::ReadFail)
