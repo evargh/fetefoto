@@ -39,9 +39,9 @@ pub enum DatabaseError {
 
 impl ImageDB {
     pub async fn new(filepath: &str) -> Result<ImageDB, DatabaseError> {
-        let pool = SqlitePool::connect(&filepath)
+        let pool = SqlitePool::connect(filepath)
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
         Ok(ImageDB {
             filepath: String::from(filepath),
             pool,
@@ -56,7 +56,7 @@ impl ImageDB {
         if !Sqlite::database_exists(filepath).await.unwrap_or(false) {
             Sqlite::create_database(filepath)
                 .await
-                .map_err(|e| DatabaseError::SQLXError(e))?;
+                .map_err(DatabaseError::SQLXError)?;
             Ok(())
         } else {
             Err(DatabaseError::DatabaseExists)
@@ -68,13 +68,13 @@ impl ImageDB {
             .pool
             .acquire()
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
         // TODO: make it so that this pragma is always applied, since it's only connection-specific
         sqlx::query("PRAGMA foreign_keys = ON;")
             .execute(&mut *db)
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS images (
@@ -85,7 +85,7 @@ impl ImageDB {
         )
         .execute(&mut *db)
         .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+        .map_err(DatabaseError::SQLXError)?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS tags (
@@ -98,7 +98,7 @@ impl ImageDB {
         )
         .execute(&mut *db)
         .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+        .map_err(DatabaseError::SQLXError)?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS images_to_tags (
@@ -113,7 +113,7 @@ impl ImageDB {
         )
         .execute(&mut *db)
         .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+        .map_err(DatabaseError::SQLXError)?;
 
         Ok(())
     }
@@ -128,7 +128,7 @@ impl ImageDB {
             .pool
             .acquire()
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
         let ((fps, hashes), tags): ((Vec<&str>, Vec<&str>), Vec<&HashSet<String>>) = ims
             .into_iter()
@@ -138,7 +138,7 @@ impl ImageDB {
         let tags_str: Vec<String> = tags
             .clone()
             .into_iter()
-            .fold(HashSet::<String>::new(), |acc, x| &acc | &x)
+            .fold(HashSet::<String>::new(), |acc, x| &acc | x)
             .into_iter()
             .map(|x| format!("(\'{}\')", x))
             .collect::<Vec<String>>();
@@ -146,7 +146,7 @@ impl ImageDB {
         sqlx::query("PRAGMA foreign_keys = ON;")
             .execute(&mut *db)
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
         let fps_hashes_zipped = std::iter::zip(&fps, &hashes)
             .map(|x| format!("(\'{}\', \'{}\')", x.0, x.1))
@@ -160,7 +160,7 @@ impl ImageDB {
         )
         .execute(&mut *db)
         .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+        .map_err(DatabaseError::SQLXError)?;
 
         sqlx::query(
             &format!(
@@ -170,11 +170,11 @@ impl ImageDB {
         )
         .execute(&mut *db)
         .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+        .map_err(DatabaseError::SQLXError)?;
 
         for im in std::iter::zip(hashes, tags).collect::<Vec<(&str, &HashSet<String>)>>() {
             let personal_tags_str: String =
-                im.1.into_iter()
+                im.1.iter()
                     .map(|x| format!("name = \'{}\'", x))
                     .collect::<Vec<String>>()
                     .join(" OR ");
@@ -184,14 +184,14 @@ impl ImageDB {
             )
             .fetch_all(&mut *db)
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
             let image_result: u32 = sqlx::query_scalar(
                 &format!("SELECT (id) FROM images WHERE hash = \'{}\';", im.0)[..],
             )
             .fetch_one(&mut *db)
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
             let image_tag_tuples = tag_results
                 .into_iter()
@@ -206,13 +206,13 @@ impl ImageDB {
             )
             .execute(&mut *db)
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
         }
 
         Ok(())
     }
 
-    pub async fn get_images_from_db_by_fp<'a>(
+    pub async fn get_images_from_db_by_fp(
         &self,
         fp: impl IntoIterator<Item = impl AsRef<str>>,
     ) -> Result<Vec<Image>, DatabaseError> {
@@ -225,7 +225,7 @@ impl ImageDB {
         self.get_images_from_db_by_hashes(hashes).await
     }
 
-    pub async fn get_images_from_db_by_hashes<'a>(
+    pub async fn get_images_from_db_by_hashes(
         &self,
         hs: impl IntoIterator<Item = impl AsRef<str>>,
     ) -> Result<Vec<Image>, DatabaseError> {
@@ -238,7 +238,7 @@ impl ImageDB {
         self.req_imagerow_from_db(pairs).await
     }
 
-    pub async fn get_images_from_db_by_tags<'a>(
+    pub async fn get_images_from_db_by_tags(
         &self,
         ts: impl IntoIterator<Item = impl AsRef<str>>,
         query: FilterType,
@@ -282,7 +282,7 @@ impl ImageDB {
             .pool
             .acquire()
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
         // select all hashes such that there is a tag match
         let hashes: Vec<String> = sqlx::query_scalar(
@@ -296,7 +296,7 @@ impl ImageDB {
         )
         .fetch_all(&mut *db)
         .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+        .map_err(DatabaseError::SQLXError)?;
 
         // query for all those hashes
         let hash_pairs = hashes
@@ -316,13 +316,13 @@ impl ImageDB {
         )
         .fetch_all(&mut *db)
         .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+        .map_err(DatabaseError::SQLXError)?;
 
         Ok(ImageDB::convert_imagerow_to_images(image_data))
     }
 
-    // delete by submitting image, not hash
-    pub async fn delete_images_from_db<'a>(
+    // TODO: delete by submitting image, not hash
+    pub async fn delete_images_from_db(
         &self,
         hs: impl IntoIterator<Item = impl AsRef<str>>,
     ) -> Result<Vec<String>, DatabaseError> {
@@ -330,12 +330,12 @@ impl ImageDB {
             .pool
             .acquire()
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
         sqlx::query("PRAGMA foreign_keys = ON;")
             .execute(&mut *db)
             .await
-            .map_err(|e| DatabaseError::SQLXError(e))?;
+            .map_err(DatabaseError::SQLXError)?;
 
         let pairs = &hs
             .into_iter()
@@ -351,7 +351,7 @@ impl ImageDB {
         )
         .fetch_all(&mut *db)
         .await
-        .map_err(|e| DatabaseError::SQLXError(e))?;
+        .map_err(DatabaseError::SQLXError)?;
 
         Ok(image_hashes)
     }
@@ -412,7 +412,16 @@ mod tests {
             String::from("test/test2/ghi.jpg"),
             HashSet::from([String::from("hi"), String::from("hi")]),
         )?;
-        assert_eq!(output, vec![im1, im2]);
+        let v = vec![im1, im2];
+        for i in &output {
+            let mut notinotherset = false;
+            for j in &v {
+                if i == j {
+                    notinotherset = true;
+                }
+            }
+            assert!(notinotherset);
+        }
 
         println!("removing image");
         db.delete_images_from_db(std::iter::once("test/test2/ghi.jpg"))

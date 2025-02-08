@@ -8,7 +8,7 @@ pub enum ImageError {
     ReadFail,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Image {
     hash: String,
     filepath: String,
@@ -17,7 +17,7 @@ pub struct Image {
 
 impl PartialEq for Image {
     fn eq(&self, other: &Self) -> bool {
-        (&self.hash == &other.hash) && (&self.tags == &other.tags)
+        (self.hash == other.hash) && (self.tags == other.tags)
     }
 }
 
