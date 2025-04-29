@@ -1,3 +1,4 @@
+use crate::ast::AST;
 use crate::image::Image;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::collections::{HashMap, HashSet};
@@ -238,23 +239,11 @@ impl ImageDB {
         self.req_imagerow_from_db(pairs).await
     }
 
-    pub async fn get_images_from_db_by_tags(
+    pub async fn get_images_from_db_by_tag_query(
         &self,
-        ts: impl IntoIterator<Item = impl AsRef<str>>,
-        query: FilterType,
+        q: AST,
     ) -> Result<Vec<Image>, DatabaseError> {
-        let q = match query {
-            FilterType::AND => " AND ",
-            FilterType::OR => " OR ",
-        };
-
-        let pairs = ts
-            .into_iter()
-            .map(|x| format!("name = \'{}\'", x.as_ref()))
-            .collect::<Vec<String>>()
-            .join(q);
-
-        self.req_imagerow_from_db(pairs).await
+        self.req_imagerow_from_db(format!("{}", q)).await
     }
 
     // TODO: lots of unwraps
@@ -278,6 +267,7 @@ impl ImageDB {
         &self,
         pairs: impl AsRef<str>,
     ) -> Result<Vec<Image>, DatabaseError> {
+        println!("{}", pairs.as_ref());
         let mut db = self
             .pool
             .acquire()
@@ -400,10 +390,9 @@ mod tests {
         db.add_images_to_db(std::iter::once(&output)).await?;
 
         println!("retrieving image by tag");
-        let output = db
-            .get_images_from_db_by_tags(std::iter::once("hi"), FilterType::OR)
-            .await?;
 
+        let query = AST::parse_query("(hi AND bye) OR NOT 你好");
+        let output = db.get_images_from_db_by_tag_query(query).await?;
         let im1: Image = Image::new_with_tags(
             String::from("test/abc.gif"),
             HashSet::from([String::from("hi"), String::from("bye")]),
@@ -427,7 +416,6 @@ mod tests {
         db.delete_images_from_db(std::iter::once("test/test2/ghi.jpg"))
             .await?;
 
-        //fs::remove_file("fetefoto.db")?;
         Ok(())
     }
 
