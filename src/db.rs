@@ -2,6 +2,7 @@ use crate::ast::AST;
 use crate::image::Image;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use thiserror;
 
 #[derive(Debug, Default, sqlx::FromRow)]
@@ -19,7 +20,7 @@ impl ImageRow {
 }
 
 pub struct ImageDB {
-    filepath: String,
+    filepath: PathBuf,
     pool: SqlitePool,
 }
 
@@ -39,26 +40,21 @@ pub enum DatabaseError {
 }
 
 impl ImageDB {
-    pub async fn new(filepath: &str) -> Result<ImageDB, DatabaseError> {
-        let pool = SqlitePool::connect(filepath)
-            .await
-            .map_err(DatabaseError::SQLXError)?;
-        Ok(ImageDB {
-            filepath: String::from(filepath),
-            pool,
-        })
-    }
-
     pub fn get_filepath(&self) -> &str {
-        &self.filepath
+        &self.filepath.as_os_str().to_str().unwrap()[..]
     }
 
-    pub async fn create_db(filepath: &str) -> Result<(), DatabaseError> {
-        if !Sqlite::database_exists(filepath).await.unwrap_or(false) {
-            Sqlite::create_database(filepath)
+    pub async fn create_db(filepath: PathBuf) -> Result<ImageDB, DatabaseError> {
+        let path_string = format!("sqlite://{}", filepath.as_os_str().to_str().unwrap());
+        println!("reported by creation: {}", path_string);
+        if !Sqlite::database_exists(&path_string).await.unwrap_or(false) {
+            Sqlite::create_database(&path_string)
                 .await
                 .map_err(DatabaseError::SQLXError)?;
-            Ok(())
+            let pool = SqlitePool::connect(&path_string)
+                .await
+                .map_err(DatabaseError::SQLXError)?;
+            Ok(ImageDB { filepath, pool })
         } else {
             Err(DatabaseError::DatabaseExists)
         }
@@ -226,7 +222,49 @@ impl ImageDB {
         self.get_images_from_db_by_hashes(hashes).await
     }
 
-    pub async fn get_images_from_db_by_hashes(
+    pub async fn get_images_from_db_by_tag_query(
+        &self,
+        q: AST,
+    ) -> Result<Vec<Image>, DatabaseError> {
+        self.req_imagerow_from_db(format!("{}", q)).await
+    }
+
+    // TODO: delete by submitting image, not hash
+    pub async fn delete_images_from_db(
+        &self,
+        hs: impl IntoIterator<Item = impl AsRef<str>>,
+    ) -> Result<Vec<String>, DatabaseError> {
+        let mut db = self
+            .pool
+            .acquire()
+            .await
+            .map_err(DatabaseError::SQLXError)?;
+
+        sqlx::query("PRAGMA foreign_keys = ON;")
+            .execute(&mut *db)
+            .await
+            .map_err(DatabaseError::SQLXError)?;
+
+        let pairs = &hs
+            .into_iter()
+            .map(|x| format!("hash = \'{}\'", x.as_ref()))
+            .collect::<Vec<String>>()
+            .join(" OR ")[..];
+        let image_hashes: Vec<String> = sqlx::query_scalar(
+            &format!(
+                "DELETE FROM images 
+                WHERE {};",
+                pairs
+            )[..],
+        )
+        .fetch_all(&mut *db)
+        .await
+        .map_err(DatabaseError::SQLXError)?;
+
+        Ok(image_hashes)
+    }
+
+    async fn get_images_from_db_by_hashes(
         &self,
         hs: impl IntoIterator<Item = impl AsRef<str>>,
     ) -> Result<Vec<Image>, DatabaseError> {
@@ -237,13 +275,6 @@ impl ImageDB {
             .join(" OR ");
 
         self.req_imagerow_from_db(pairs).await
-    }
-
-    pub async fn get_images_from_db_by_tag_query(
-        &self,
-        q: AST,
-    ) -> Result<Vec<Image>, DatabaseError> {
-        self.req_imagerow_from_db(format!("{}", q)).await
     }
 
     // TODO: lots of unwraps
@@ -310,41 +341,6 @@ impl ImageDB {
 
         Ok(ImageDB::convert_imagerow_to_images(image_data))
     }
-
-    // TODO: delete by submitting image, not hash
-    pub async fn delete_images_from_db(
-        &self,
-        hs: impl IntoIterator<Item = impl AsRef<str>>,
-    ) -> Result<Vec<String>, DatabaseError> {
-        let mut db = self
-            .pool
-            .acquire()
-            .await
-            .map_err(DatabaseError::SQLXError)?;
-
-        sqlx::query("PRAGMA foreign_keys = ON;")
-            .execute(&mut *db)
-            .await
-            .map_err(DatabaseError::SQLXError)?;
-
-        let pairs = &hs
-            .into_iter()
-            .map(|x| format!("hash = \'{}\'", x.as_ref()))
-            .collect::<Vec<String>>()
-            .join(" OR ")[..];
-        let image_hashes: Vec<String> = sqlx::query_scalar(
-            &format!(
-                "DELETE FROM images 
-                WHERE {};",
-                pairs
-            )[..],
-        )
-        .fetch_all(&mut *db)
-        .await
-        .map_err(DatabaseError::SQLXError)?;
-
-        Ok(image_hashes)
-    }
 }
 
 #[cfg(test)]
@@ -358,12 +354,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_new_database() -> Result<(), Box<dyn error::Error>> {
-        let filename = "sqlite://fetefoto.db";
+        let filename = PathBuf::from("fetefoto.db");
         println!("creating file");
-        ImageDB::create_db(filename).await?;
-
-        println!("creating object");
-        let mut db = ImageDB::new(filename).await?;
+        let mut db = ImageDB::create_db(filename).await?;
 
         println!("creating table");
         db.create_table().await?;
@@ -392,7 +385,7 @@ mod tests {
         println!("retrieving image by tag");
 
         let query = AST::parse_query("(hi AND bye) OR NOT 你好");
-        let output = db.get_images_from_db_by_tag_query(query).await?;
+        let output = db.get_images_from_db_by_tag_query(query.unwrap()).await?;
         let im1: Image = Image::new_with_tags(
             String::from("test/abc.gif"),
             HashSet::from([String::from("hi"), String::from("bye")]),

@@ -26,14 +26,20 @@ impl fmt::Display for AST {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum QueryError {
+    #[error("Invalid Query")]
+    InvalidQuery,
+}
+
 impl AST {
-    pub fn parse_query(ts: &str) -> AST {
+    pub fn parse_query(ts: &str) -> Result<AST, QueryError> {
         let parsed = ASTParser::parse(Rule::program, ts)
             .expect("Parse failed")
             .next()
-            .unwrap();
+            .ok_or(QueryError::InvalidQuery)?;
 
-        Self::generate_ast(parsed)
+        Ok(Self::generate_ast(parsed))
     }
 
     pub fn generate_ast(pair: pest::iterators::Pair<Rule>) -> AST {
@@ -95,16 +101,16 @@ mod tests {
 
         assert!(parsed.is_err(), "invalid parse succeeded");
         let input = "a AND (NOT (b OR c))";
-        let ast = super::AST::parse_query(input);
+        let ast = AST::parse_query(input);
         assert_eq!(
-            format!("{}", ast),
+            format!("{}", ast.unwrap()),
             "(name = \'a\' AND (NOT (name = \'b\' OR name = \'c\')))"
         );
 
         let input = "a AND b AND c AND d";
-        let ast = super::AST::parse_query(input);
+        let ast = AST::parse_query(input);
         assert_eq!(
-            format!("{}", ast),
+            format!("{}", ast.unwrap()),
             "(((name = \'a\' AND name = \'b\') AND name = \'c\') AND name = \'d\')"
         );
 

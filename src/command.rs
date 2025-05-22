@@ -1,4 +1,5 @@
 pub mod init;
+pub mod mount;
 pub mod scan;
 use clap::Subcommand;
 use std::error;
@@ -24,19 +25,25 @@ pub enum CommandType {
     AddTags,
     RmTags,
     RmImage,
+    Mount { dir: Option<String> },
 }
 
 impl CommandType {
     pub async fn parse_command(inp: Option<CommandType>) -> Result<(), Box<dyn error::Error>> {
         match inp {
             Some(CommandType::Scan { dir }) => {
-                let comm = scan::Scan::create_scan(dir)?;
-                comm.execute();
+                let comm = scan::Scan::create(dir)?;
+                comm.execute().await.map(Box::new)?;
                 Ok(())
             }
             Some(CommandType::Init { dir }) => {
-                let comm = init::Init::create_scan(dir)?;
+                let comm = init::Init::create(dir)?;
                 comm.execute().await.map(Box::new)?;
+                Ok(())
+            }
+            Some(CommandType::Mount { dir }) => {
+                let comm = mount::Mount::create(dir)?;
+                comm.execute()?;
                 Ok(())
             }
 
