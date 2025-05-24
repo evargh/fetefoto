@@ -1,9 +1,8 @@
+use crate::command::{CommandManager, ConfigData};
 use crate::db::ImageDB;
-use crate::image::Image;
 use directories::ProjectDirs;
 use std::{
-    env, error, fs,
-    io::prelude::*,
+    error, fs,
     path::{Path, PathBuf},
 };
 use thiserror;
@@ -53,30 +52,19 @@ impl Init {
         }
     }
 
-    pub fn init_config(db_name: &str) -> Result<(), Box<dyn error::Error>> {
-        // create a file just called config which stores key-value pairs
-        if let Some(proj_dirs) = ProjectDirs::from("", "FeteFoto", "FeteFoto") {
-            let config_dir = proj_dirs.config_dir();
-            let mut fp = Path::new(config_dir).to_path_buf();
-            fp.push("config");
-            let mut file = fs::File::create(fp)?;
-            file.write_all(format!("config: \"{}\"", db_name).as_bytes())?;
-            Ok(())
-        } else {
-            Err(Box::new(InitError::BadConfigPath))
-        }
-    }
-
     // TODO: ideally, should be:
     //      if config doesn't exist, make it
     //      if config does exist, read it
     pub async fn execute(mut self) -> Result<(), Box<dyn error::Error>> {
         self.dir.push("fetefoto.db");
-        let mut idb = ImageDB::create_db(self.dir).await.map_err(Box::new)?;
-        idb.create_table().await?;
+        let db = ImageDB::create_db(self.dir).await.map_err(Box::new)?;
+        db.create_table().await?;
 
-        println!("{}", idb.get_filepath());
-        Init::init_config(idb.get_filepath())?;
+        let cd = ConfigData {
+            db_location: Some(db.get_filepath().to_owned()),
+        };
+        db.drop_connections().await;
+        CommandManager::set_config(cd)?;
         Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use crate::command::CommandType;
+use crate::command::CommandManager;
 use clap::Parser;
 use std::error;
 
@@ -12,12 +12,12 @@ pub mod image;
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<CommandType>,
+    command: Option<CommandManager>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
     let args = Cli::parse();
-    CommandType::parse_command(args.command).await?;
+    CommandManager::parse_command(args.command).await?;
     Ok(())
 }

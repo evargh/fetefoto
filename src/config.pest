@@ -1,0 +1,13 @@
+WHITESPACE = _{ " " | "\t" }
+NEWLINE = _{ "\n" | "\r\n" }
+
+file = { SOI ~ line* ~ EOI }
+
+line = _{ (db_location_pair | dummy_pair) | empty_line }
+
+db_location_pair = { "db_location" ~ WHITESPACE* ~ ":" ~ WHITESPACE* ~ value ~ NEWLINE? }
+dummy_pair = { "dummy" ~ WHITESPACE* ~ ":" ~ WHITESPACE* ~ value ~ NEWLINE? }
+
+value = { (!NEWLINE ~ ANY)* }
+
+empty_line = _{ WHITESPACE* ~ NEWLINE }

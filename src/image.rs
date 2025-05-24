@@ -8,7 +8,7 @@ pub enum ImageError {
     ReadFail,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Image {
     hash: String,
     filepath: String,
@@ -88,11 +88,9 @@ mod tests {
 
     #[test]
     fn add_tag_to_image() -> Result<(), Box<dyn std::error::Error>> {
-        let mut input: Image = Image::new(String::from("test/abc.gif"))?;
-        let output: Image = Image::new_with_tags(
-            String::from("test/abc.gif"),
-            HashSet::from([String::from("hi")]),
-        )?;
+        let mut input: Image = Image::new(String::from("test/a"))?;
+        let output: Image =
+            Image::new_with_tags(String::from("test/a"), HashSet::from([String::from("hi")]))?;
 
         input.add_tag(String::from("hi"));
 
@@ -102,9 +100,9 @@ mod tests {
 
     #[test]
     fn add_unicode_tag_to_image() -> Result<(), Box<dyn std::error::Error>> {
-        let mut input: Image = Image::new(String::from("test/abc.gif"))?;
+        let mut input: Image = Image::new(String::from("test/a"))?;
         let output: Image = Image::new_with_tags(
-            String::from("test/abc.gif"),
+            String::from("test/a"),
             HashSet::from([String::from("你好")]),
         )?;
 
@@ -116,11 +114,9 @@ mod tests {
 
     #[test]
     fn remove_tag_from_image() -> Result<(), Box<dyn std::error::Error>> {
-        let mut input: Image = Image::new_with_tags(
-            String::from("test/abc.gif"),
-            HashSet::from([String::from("hi")]),
-        )?;
-        let output: Image = Image::new(String::from("test/abc.gif"))?;
+        let mut input: Image =
+            Image::new_with_tags(String::from("test/a"), HashSet::from([String::from("hi")]))?;
+        let output: Image = Image::new(String::from("test/a"))?;
 
         input.remove_tag("hi");
 

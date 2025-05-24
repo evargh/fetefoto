@@ -1,3 +1,4 @@
+use crate::command::CommandManager;
 use crate::db::ImageDB;
 use crate::image::Image;
 use std::collections::VecDeque;
@@ -41,14 +42,18 @@ impl Scan {
         }
     }
 
-    pub async fn execute(self) -> Result<(), ScanError> {
-        // needs to read the path to the database
+    pub async fn execute(self) -> Result<(), Box<dyn error::Error>> {
+        let config = CommandManager::get_config().unwrap();
+        let db: ImageDB = ImageDB::get_connection(config.db_location.unwrap()).await?;
+
         let mut q: VecDeque<PathBuf> = VecDeque::new();
         if !self.dir.is_dir() {
-            return Err(ScanError::BadPath);
+            return Err(Box::new(ScanError::BadPath));
         }
         q.push_back(self.dir);
         // This function should go through the directory and scan all files into the database
+        let mut batchsize = 100;
+        let mut addset: Vec<Image> = Vec::with_capacity(batchsize);
         while q.front().is_some() {
             let dir = q.pop_front().unwrap();
             for entry_result in fs::read_dir(dir).map_err(|_| ScanError::BadPath)? {
@@ -58,13 +63,21 @@ impl Scan {
                 if path.is_dir() {
                     q.push_back(path);
                 } else if path.is_file() {
+                    batchsize -= 1;
                     println!("File: {}", path.display());
                     let output: Image = Image::new(String::from(format!("{}", path.display())))
                         .map_err(|_| ScanError::FileError)?;
-                    //db.add_images_to_db(std::iter::once(&output)).await?;
+                    addset.push(output);
+                    if batchsize == 0 {
+                        db.add_images_to_db(&addset).await?;
+                        addset.clear();
+                        batchsize = 100;
+                    }
                 }
             }
         }
+        db.add_images_to_db(&addset).await?;
+        db.drop_connections().await;
         Ok(())
     }
 }

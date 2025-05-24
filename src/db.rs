@@ -2,7 +2,7 @@ use crate::ast::AST;
 use crate::image::Image;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thiserror;
 
 #[derive(Debug, Default, sqlx::FromRow)]
@@ -40,8 +40,8 @@ pub enum DatabaseError {
 }
 
 impl ImageDB {
-    pub fn get_filepath(&self) -> &str {
-        &self.filepath.as_os_str().to_str().unwrap()[..]
+    pub fn get_filepath(&self) -> &PathBuf {
+        &self.filepath
     }
 
     pub async fn create_db(filepath: PathBuf) -> Result<ImageDB, DatabaseError> {
@@ -60,7 +60,15 @@ impl ImageDB {
         }
     }
 
-    pub async fn create_table(&mut self) -> Result<(), DatabaseError> {
+    pub async fn get_connection(filepath: PathBuf) -> Result<ImageDB, DatabaseError> {
+        let path_string = format!("sqlite://{}", filepath.as_os_str().to_str().unwrap());
+        let pool = SqlitePool::connect(&path_string)
+            .await
+            .map_err(DatabaseError::SQLXError)?;
+        Ok(ImageDB { filepath, pool })
+    }
+
+    pub async fn create_table(&self) -> Result<(), DatabaseError> {
         let mut db = self
             .pool
             .acquire()
@@ -118,9 +126,10 @@ impl ImageDB {
     // This function is bizarre, because it needs to first add tags and hashes before resolving the
     // many-to-many relationship
     pub async fn add_images_to_db<'a>(
-        &mut self,
+        &self,
         ims: impl IntoIterator<Item = &'a Image>,
     ) -> Result<(), DatabaseError> {
+        println!("adding images to db");
         let mut db = self
             .pool
             .acquire()
@@ -131,19 +140,6 @@ impl ImageDB {
             .into_iter()
             .map(|x| ((x.get_fp(), x.get_hash()), x.get_tags()))
             .unzip();
-
-        let tags_str: Vec<String> = tags
-            .clone()
-            .into_iter()
-            .fold(HashSet::<String>::new(), |acc, x| &acc | x)
-            .into_iter()
-            .map(|x| format!("(\'{}\')", x))
-            .collect::<Vec<String>>();
-
-        sqlx::query("PRAGMA foreign_keys = ON;")
-            .execute(&mut *db)
-            .await
-            .map_err(DatabaseError::SQLXError)?;
 
         let fps_hashes_zipped = std::iter::zip(&fps, &hashes)
             .map(|x| format!("(\'{}\', \'{}\')", x.0, x.1))
@@ -159,51 +155,61 @@ impl ImageDB {
         .await
         .map_err(DatabaseError::SQLXError)?;
 
-        sqlx::query(
-            &format!(
-                "INSERT OR IGNORE INTO tags (name) VALUES {};",
-                tags_str.join(", ")
-            )[..],
-        )
-        .execute(&mut *db)
-        .await
-        .map_err(DatabaseError::SQLXError)?;
-
-        for im in std::iter::zip(hashes, tags).collect::<Vec<(&str, &HashSet<String>)>>() {
-            let personal_tags_str: String =
-                im.1.iter()
-                    .map(|x| format!("name = \'{}\'", x))
-                    .collect::<Vec<String>>()
-                    .join(" OR ");
-
-            let tag_results: Vec<u32> = sqlx::query_scalar(
-                &format!("SELECT (id) FROM tags WHERE {};", personal_tags_str)[..],
-            )
-            .fetch_all(&mut *db)
-            .await
-            .map_err(DatabaseError::SQLXError)?;
-
-            let image_result: u32 = sqlx::query_scalar(
-                &format!("SELECT (id) FROM images WHERE hash = \'{}\';", im.0)[..],
-            )
-            .fetch_one(&mut *db)
-            .await
-            .map_err(DatabaseError::SQLXError)?;
-
-            let image_tag_tuples = tag_results
+        if tags.is_empty() {
+            let tags_str: Vec<String> = tags
+                .clone()
                 .into_iter()
-                .map(|x| format!("({}, {})", image_result, x))
+                .fold(HashSet::<String>::new(), |acc, x| &acc | x)
+                .into_iter()
+                .map(|x| format!("(\'{}\')", x))
                 .collect::<Vec<String>>();
 
             sqlx::query(
                 &format!(
-                    "INSERT INTO images_to_tags (image_id, tag_id) VALUES {};",
-                    image_tag_tuples.join(", ")
+                    "INSERT OR IGNORE INTO tags (name) VALUES {};",
+                    tags_str.join(", ")
                 )[..],
             )
             .execute(&mut *db)
             .await
             .map_err(DatabaseError::SQLXError)?;
+
+            for im in std::iter::zip(hashes, tags).collect::<Vec<(&str, &HashSet<String>)>>() {
+                let personal_tags_str: String =
+                    im.1.iter()
+                        .map(|x| format!("name = \'{}\'", x))
+                        .collect::<Vec<String>>()
+                        .join(" OR ");
+
+                let tag_results: Vec<u32> = sqlx::query_scalar(
+                    &format!("SELECT (id) FROM tags WHERE {};", personal_tags_str)[..],
+                )
+                .fetch_all(&mut *db)
+                .await
+                .map_err(DatabaseError::SQLXError)?;
+
+                let image_result: u32 = sqlx::query_scalar(
+                    &format!("SELECT (id) FROM images WHERE hash = \'{}\';", im.0)[..],
+                )
+                .fetch_one(&mut *db)
+                .await
+                .map_err(DatabaseError::SQLXError)?;
+
+                let image_tag_tuples = tag_results
+                    .into_iter()
+                    .map(|x| format!("({}, {})", image_result, x))
+                    .collect::<Vec<String>>();
+
+                sqlx::query(
+                    &format!(
+                        "INSERT INTO images_to_tags (image_id, tag_id) VALUES {};",
+                        image_tag_tuples.join(", ")
+                    )[..],
+                )
+                .execute(&mut *db)
+                .await
+                .map_err(DatabaseError::SQLXError)?;
+            }
         }
 
         Ok(())
@@ -341,60 +347,139 @@ impl ImageDB {
 
         Ok(ImageDB::convert_imagerow_to_images(image_data))
     }
+
+    pub async fn drop_connections(self) {
+        self.pool.close().await;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{collections::HashSet, error};
+    use std::{collections::HashSet, error, fs};
 
-    // I can't directly test some of the database logic, so some of the tests will have
-    // dependencies
-    // I'm going to just make one integration test
+    fn create_temp_dir() -> Result<(), Box<dyn error::Error>> {
+        fs::create_dir("temp")?;
+        Ok(())
+    }
 
-    #[tokio::test]
-    async fn create_new_database() -> Result<(), Box<dyn error::Error>> {
-        let filename = PathBuf::from("fetefoto.db");
-        println!("creating file");
-        let mut db = ImageDB::create_db(filename).await?;
+    async fn delete_database(db: ImageDB, dbname: &str) -> Result<(), Box<dyn error::Error>> {
+        db.drop_connections().await;
+        let mut filename = PathBuf::from("temp");
+        filename.push(dbname);
+        println!("{}", filename.as_os_str().to_str().unwrap());
+        if filename.exists() {
+            fs::remove_file(filename)?;
+        }
+        Ok(())
+    }
 
-        println!("creating table");
-        db.create_table().await?;
+    async fn create_new_database(dbname: &str) -> Result<ImageDB, Box<dyn error::Error>> {
+        // create_temp_dir's check can pass but the attempt to create a directory can fail
+        //
+        // ultimately, it's an error we can ignore for the sake of testing the database
+        let _ = create_temp_dir();
+        let mut filename = PathBuf::from("temp");
+        filename.push(dbname);
+        println!("{}", filename.as_os_str().to_str().unwrap());
+        let db = ImageDB::create_db(filename).await?;
+        return Ok(db);
+    }
 
-        println!("adding image");
-        let output: Image = Image::new_with_tags(
-            String::from("test/abc.gif"),
+    async fn add_images_to_db_test_scaffolding<'a>(
+        db: &ImageDB,
+    ) -> Result<(), Box<dyn error::Error>> {
+        println!("adding single default image");
+        let output1: Image = Image::new_with_tags(
+            String::from("test/a"),
             HashSet::from([String::from("hi"), String::from("bye")]),
         )?;
-        db.add_images_to_db(std::iter::once(&output)).await?;
+        db.add_images_to_db(std::iter::once(&output1)).await?;
 
         println!("adding image with unicode tags");
-        let output: Image = Image::new_with_tags(
-            String::from("test/def.gif"),
+        let output2: Image = Image::new_with_tags(
+            String::from("test/b"),
             HashSet::from([String::from("你好")]),
         )?;
-        db.add_images_to_db(std::iter::once(&output)).await?;
+        db.add_images_to_db(std::iter::once(&output2)).await?;
 
         println!("adding image with redundant tags");
-        let output: Image = Image::new_with_tags(
-            String::from("test/test2/ghi.jpg"),
+        let output3: Image = Image::new_with_tags(
+            String::from("test/你好"),
             HashSet::from([String::from("hi"), String::from("hi")]),
         )?;
-        db.add_images_to_db(std::iter::once(&output)).await?;
+        db.add_images_to_db(std::iter::once(&output3)).await?;
 
-        println!("retrieving image by tag");
+        println!("adding multiple images");
+        let output4: Image = Image::new_with_tags(
+            String::from("test/test2/c"),
+            HashSet::from([String::from("hi")]),
+        )?;
+        let output5: Image = Image::new_with_tags(
+            String::from("test/test2/d"),
+            HashSet::from([String::from("你好")]),
+        )?;
+        db.add_images_to_db(vec![&output4, &output5]).await?;
+        Ok(())
+    }
 
+    #[tokio::test]
+    async fn create_new_database_test() -> Result<(), Box<dyn error::Error>> {
+        println!("creating database");
+        let db = create_new_database("test1.db").await?;
+        println!("deleting database");
+        delete_database(db, "test1.db").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_new_table_test() -> Result<(), Box<dyn error::Error>> {
+        println!("creating database");
+        let db = create_new_database("test2.db").await?;
+        println!("creating table");
+        db.create_table().await?;
+        println!("deleting database");
+        delete_database(db, "test2.db").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn add_images_to_db_test() -> Result<(), Box<dyn error::Error>> {
+        println!("creating database");
+        let db = create_new_database("test3.db").await?;
+        println!("creating table");
+        db.create_table().await?;
+        println!("adding images to database");
+        add_images_to_db_test_scaffolding(&db).await?;
+        println!("deleting database");
+        delete_database(db, "test3.db").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn retrieve_image_by_tag_test() -> Result<(), Box<dyn error::Error>> {
+        println!("creating database");
+        let db = create_new_database("test4.db").await?;
+        println!("creating table");
+        db.create_table().await?;
+        println!("adding images to database");
+        add_images_to_db_test_scaffolding(&db).await?;
         let query = AST::parse_query("(hi AND bye) OR NOT 你好");
         let output = db.get_images_from_db_by_tag_query(query.unwrap()).await?;
         let im1: Image = Image::new_with_tags(
-            String::from("test/abc.gif"),
+            String::from("test/a"),
             HashSet::from([String::from("hi"), String::from("bye")]),
         )?;
         let im2: Image = Image::new_with_tags(
-            String::from("test/test2/ghi.jpg"),
-            HashSet::from([String::from("hi"), String::from("hi")]),
+            String::from("test/你好"),
+            HashSet::from([String::from("hi")]),
         )?;
-        let v = vec![im1, im2];
+        let im3: Image = Image::new_with_tags(
+            String::from("test/test2/c"),
+            HashSet::from([String::from("hi")]),
+        )?;
+        let v = vec![im1, im2, im3];
+        println!("{:?}", output);
         for i in &output {
             let mut notinotherset = false;
             for j in &v {
@@ -404,14 +489,23 @@ mod tests {
             }
             assert!(notinotherset);
         }
-
-        println!("removing image");
-        db.delete_images_from_db(std::iter::once("test/test2/ghi.jpg"))
-            .await?;
-
+        println!("deleting database");
+        delete_database(db, "test4.db").await?;
         Ok(())
     }
 
-    #[test]
-    fn update_images_in_database() {}
+    #[tokio::test]
+    async fn remove_image_by_name_test() -> Result<(), Box<dyn error::Error>> {
+        println!("creating database");
+        let db = create_new_database("test5.db").await?;
+        println!("creating table");
+        db.create_table().await?;
+        println!("adding images to database");
+        add_images_to_db_test_scaffolding(&db).await?;
+        db.delete_images_from_db(std::iter::once("test/test2/d"))
+            .await?;
+        println!("deleting database");
+        delete_database(db, "test5.db").await?;
+        Ok(())
+    }
 }
