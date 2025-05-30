@@ -139,7 +139,7 @@ mod tests {
     // test reading the config file properly
     #[test]
     fn read_correct_config() -> Result<(), Box<dyn error::Error>> {
-        let path_buf = PathBuf::from("test/config_test/correct");
+        let path_buf = PathBuf::from("persistent_test_data/config_test/correct");
         let config_data = CommandManager::get_config(Some(&path_buf));
         if let Some(location) = config_data.db_location {
             let true_path = PathBuf::from("/some/path");
@@ -153,7 +153,7 @@ mod tests {
     // should return a None if the pair doesn't exist
     #[test]
     fn read_empty_config() -> Result<(), Box<dyn error::Error>> {
-        let path_buf = PathBuf::from("test/config_test/empty_config");
+        let path_buf = PathBuf::from("persistent_test_data/config_test/empty_config");
         let config_data = CommandManager::get_config(Some(&path_buf));
         if let Some(_location) = config_data.db_location {
             panic!()
@@ -166,14 +166,14 @@ mod tests {
     #[test]
     #[should_panic]
     fn read_config_with_extra_entry() {
-        let path_buf = PathBuf::from("test/config_test/extra_config");
+        let path_buf = PathBuf::from("persistent_test_data/config_test/extra_config");
         CommandManager::get_config(Some(&path_buf));
     }
 
     #[test]
     #[should_panic]
     fn read_nonexistent_config() {
-        let path_buf = PathBuf::from("test/config_test/dir_no_config");
+        let path_buf = PathBuf::from("persistent_test_data/config_test/dir_no_config");
         CommandManager::get_config(Some(&path_buf));
     }
     // test writing to config properly (pass non-unicode characters and see)

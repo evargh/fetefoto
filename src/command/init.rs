@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn create_command_from_correct_passed_dir() {
-        let input_path_string = "test/config_test/correct".to_owned();
+        let input_path_string = "persistent_test_data/config_test/correct".to_owned();
         let input_path_buf = PathBuf::from(&input_path_string);
         let dir_data = Init::create(Some(input_path_string)).unwrap();
         let pb = dir_data.dir;
