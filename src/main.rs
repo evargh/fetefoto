@@ -5,7 +5,6 @@ use std::error;
 pub mod ast;
 pub mod command;
 pub mod db;
-pub mod fuse;
 pub mod image;
 
 #[derive(Parser, Debug)]

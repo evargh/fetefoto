@@ -43,7 +43,7 @@ impl Scan {
     }
 
     pub async fn execute(self) -> Result<(), Box<dyn error::Error>> {
-        let config = CommandManager::get_config().unwrap();
+        let config = CommandManager::get_config(None);
         let db: ImageDB = ImageDB::get_connection(config.db_location.unwrap()).await?;
 
         let mut q: VecDeque<PathBuf> = VecDeque::new();

@@ -64,7 +64,35 @@ impl Init {
             db_location: Some(db.get_filepath().to_owned()),
         };
         db.drop_connections().await;
-        CommandManager::set_config(cd)?;
+        CommandManager::set_config(cd, None)?;
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_command_from_correct_passed_dir() {
+        let input_path_string = "test/config_test/correct".to_owned();
+        let input_path_buf = PathBuf::from(&input_path_string);
+        let dir_data = Init::create(Some(input_path_string)).unwrap();
+        let pb = dir_data.dir;
+
+        assert!(pb == input_path_buf);
+    }
+
+    #[test]
+    fn read_nonexistent_passed_dir() {
+        let input_path_string = "test/config_test/dir_does_not_exist".to_owned();
+        let dir_err = Init::create(Some(input_path_string));
+
+        match dir_err {
+            Err(_) => (),
+            _ => panic!(),
+        }
+    }
+
+    // would need to run an integration test with the database for the execute command
 }

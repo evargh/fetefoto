@@ -155,7 +155,9 @@ impl ImageDB {
         .await
         .map_err(DatabaseError::SQLXError)?;
 
-        if tags.is_empty() {
+        println!("{:?}", tags);
+
+        if !tags.is_empty() {
             let tags_str: Vec<String> = tags
                 .clone()
                 .into_iter()
@@ -391,32 +393,32 @@ mod tests {
     ) -> Result<(), Box<dyn error::Error>> {
         println!("adding single default image");
         let output1: Image = Image::new_with_tags(
-            String::from("test/a"),
+            String::from("persistent_test_data/image_db_test/a"),
             HashSet::from([String::from("hi"), String::from("bye")]),
         )?;
         db.add_images_to_db(std::iter::once(&output1)).await?;
 
         println!("adding image with unicode tags");
         let output2: Image = Image::new_with_tags(
-            String::from("test/b"),
+            String::from("persistent_test_data/image_db_test/b"),
             HashSet::from([String::from("你好")]),
         )?;
         db.add_images_to_db(std::iter::once(&output2)).await?;
 
         println!("adding image with redundant tags");
         let output3: Image = Image::new_with_tags(
-            String::from("test/你好"),
+            String::from("persistent_test_data/image_db_test/你好"),
             HashSet::from([String::from("hi"), String::from("hi")]),
         )?;
         db.add_images_to_db(std::iter::once(&output3)).await?;
 
         println!("adding multiple images");
         let output4: Image = Image::new_with_tags(
-            String::from("test/test2/c"),
+            String::from("persistent_test_data/image_db_test/test2/c"),
             HashSet::from([String::from("hi")]),
         )?;
         let output5: Image = Image::new_with_tags(
-            String::from("test/test2/d"),
+            String::from("persistent_test_data/image_db_test/test2/d"),
             HashSet::from([String::from("你好")]),
         )?;
         db.add_images_to_db(vec![&output4, &output5]).await?;
@@ -467,15 +469,15 @@ mod tests {
         let query = AST::parse_query("(hi AND bye) OR NOT 你好");
         let output = db.get_images_from_db_by_tag_query(query.unwrap()).await?;
         let im1: Image = Image::new_with_tags(
-            String::from("test/a"),
+            String::from("persistent_test_data/image_db_test/a"),
             HashSet::from([String::from("hi"), String::from("bye")]),
         )?;
         let im2: Image = Image::new_with_tags(
-            String::from("test/你好"),
+            String::from("persistent_test_data/image_db_test/你好"),
             HashSet::from([String::from("hi")]),
         )?;
         let im3: Image = Image::new_with_tags(
-            String::from("test/test2/c"),
+            String::from("persistent_test_data/image_db_test/test2/c"),
             HashSet::from([String::from("hi")]),
         )?;
         let v = vec![im1, im2, im3];
@@ -502,8 +504,10 @@ mod tests {
         db.create_table().await?;
         println!("adding images to database");
         add_images_to_db_test_scaffolding(&db).await?;
-        db.delete_images_from_db(std::iter::once("test/test2/d"))
-            .await?;
+        db.delete_images_from_db(std::iter::once(
+            "persistent_test_data/image_db_test/test2/d",
+        ))
+        .await?;
         println!("deleting database");
         delete_database(db, "test5.db").await?;
         Ok(())
