@@ -69,14 +69,14 @@ impl Scan {
                         .map_err(|_| ScanError::FileError)?;
                     addset.push(output);
                     if batchsize == 0 {
-                        db.add_images_to_db(&addset).await?;
+                        db.add_images(&addset).await?;
                         addset.clear();
                         batchsize = 100;
                     }
                 }
             }
         }
-        db.add_images_to_db(&addset).await?;
+        db.add_images(&addset).await?;
         db.drop_connections().await;
         Ok(())
     }

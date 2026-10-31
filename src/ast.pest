@@ -6,10 +6,13 @@ expression = _{ or_expr }
 or_expr    =  { and_expr ~ (OR ~ and_expr)* }
 and_expr   =  { not_expr ~ (AND ~ not_expr)* }
 not_expr   =  { NOT ~ not_expr | primary }
-primary    =  { ident | "(" ~ expression ~ ")" }
+
+primary    =  { tag_path | "(" ~ expression ~ ")" }
 
 // https://github.com/pest-parser/pest/pull/247
 ident = @{ id1 ~ idn* }
+
+tag_path = @{ ident ~ ("/" ~ ident)* }
 id1   =  { UPPERCASE_LETTER | LOWERCASE_LETTER | TITLECASE_LETTER | MODIFIER_LETTER | OTHER_LETTER | LETTER_NUMBER | NONSPACING_MARK | DECIMAL_NUMBER | CONNECTOR_PUNCTUATION }
 idn   =  { id1 | SPACING_MARK | FORMAT }
 

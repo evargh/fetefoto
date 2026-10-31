@@ -1,4 +1,5 @@
 // src/main.rs
+use crate::tag::TagPath;
 use pest::Parser;
 use pest_derive::Parser;
 use std::fmt;
@@ -12,7 +13,7 @@ pub enum AST {
     AND(Box<AST>, Box<AST>),
     OR(Box<AST>, Box<AST>),
     NOT(Box<AST>),
-    VAL(String),
+    VAL(TagPath),
 }
 
 impl fmt::Display for AST {
@@ -21,23 +22,23 @@ impl fmt::Display for AST {
             AST::AND(lhs, rhs) => write!(f, "({} AND {})", lhs, rhs),
             AST::OR(lhs, rhs) => write!(f, "({} OR {})", lhs, rhs),
             AST::NOT(expr) => write!(f, "(NOT {})", expr),
-            AST::VAL(s) => write!(f, "name = \'{}\'", s),
+            AST::VAL(p) => write!(f, "name = \'{}\'", p.segments().join("/")),
         }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
-    #[error("Invalid Query")]
-    InvalidQuery,
+    #[error("invalid query: {0}")]
+    InvalidQuery(String),
 }
 
 impl AST {
     pub fn parse_query(ts: &str) -> Result<AST, QueryError> {
         let parsed = ASTParser::parse(Rule::program, ts)
-            .expect("Parse failed")
+            .map_err(|e| QueryError::InvalidQuery(e.to_string()))?
             .next()
-            .ok_or(QueryError::InvalidQuery)?;
+            .ok_or_else(|| QueryError::InvalidQuery(String::from("empty query")))?;
 
         Ok(Self::generate_ast(parsed))
     }
@@ -85,12 +86,15 @@ impl AST {
                 }
             }
             Rule::primary => Self::generate_ast(pair.into_inner().next().unwrap()),
-            Rule::ident => AST::VAL(pair.as_str().to_string()),
+            Rule::tag_path => AST::VAL(
+                TagPath::parse(pair.as_str()).expect("grammar only admits valid tag paths"),
+            ),
             _ => unreachable!("Unexpected rule: {:?}", pair.as_rule()),
         }
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -114,7 +118,18 @@ mod tests {
             "(((name = \'a\' AND name = \'b\') AND name = \'c\') AND name = \'d\')"
         );
 
-        //TODO: add more tests with unicode characters
+        let ast = AST::parse_query("root/mid AND NOT 你好/世界")?;
+        assert_eq!(
+            format!("{}", ast),
+            "(name = \'root/mid\' AND (NOT name = \'你好/世界\'))"
+        );
+        match AST::parse_query("root/mid")? {
+            AST::VAL(p) => assert_eq!(p.segments(), ["root", "mid"]),
+            other => panic!("expected a single tag path, got {other:?}"),
+        }
+        for bad in ["root / mid", "root//mid", "/root", "root/", "a AND", ""] {
+            assert!(AST::parse_query(bad).is_err(), "{bad:?} should not parse");
+        }
 
         Ok(())
     }

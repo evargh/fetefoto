@@ -6,6 +6,7 @@ pub mod ast;
 pub mod command;
 pub mod db;
 pub mod image;
+pub mod tag;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
