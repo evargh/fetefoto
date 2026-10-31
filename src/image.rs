@@ -111,7 +111,7 @@ mod tests {
     fn test_image(name: &str, tags: &[&str]) -> Result<Image, Box<dyn error::Error>> {
         Ok(Image::new_with_tags(fp(name), tags.iter().copied())?)
     }
-    
+
     #[test]
     fn add_tag_to_image() -> Result<(), Box<dyn std::error::Error>> {
         let mut input = test_image("a", &[])?;
@@ -152,7 +152,7 @@ mod tests {
         let err = boxed
             .downcast_ref::<ImageError>()
             .expect("expected an ImageError");
-        
+
         match err {
             ImageError::Read { path: p, source } => {
                 assert_eq!(p, path);
@@ -166,8 +166,7 @@ mod tests {
 
     #[test]
     fn invalid_tag_is_rejected() {
-        let boxed = test_image("a", &["ok", "root//leaf"])
-            .unwrap_err();
+        let boxed = test_image("a", &["ok", "root//leaf"]).unwrap_err();
         let err = boxed
             .downcast_ref::<ImageError>()
             .expect("expected an ImageError");

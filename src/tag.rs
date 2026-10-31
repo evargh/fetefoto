@@ -113,7 +113,7 @@ mod tests {
                 "input {s:?}"
             );
         }
-        
+
         // verify that any control-related filenames should be valid
         for s in ["Bob's", "a (b)", "AND", "'; DROP TABLE tags; --"] {
             assert!(TagPath::parse(s).is_ok(), "input {s:?} should be valid");
